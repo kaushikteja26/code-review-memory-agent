@@ -17,9 +17,9 @@ from llm.reviewer import LLMReviewer
 class ReviewOrchestrator:
     """Orchestrates the full code review pipeline."""
 
-    def __init__(self):
+    def __init__(self, bank_id: str | None = None):
         self.github = GitHubClient()
-        self.memory = HindsightMemoryManager()
+        self.memory = HindsightMemoryManager(bank_id=bank_id)
         self.llm = LLMReviewer()
 
     def review_pr(
@@ -95,11 +95,14 @@ class ReviewOrchestrator:
         print(f"   - {len(general_findings)} general findings")
 
         # Step 5: Store new learnings
+        stored_entries = []
         if use_memory:
             print("\n📝 Step 5: Extracting and storing new learnings...")
             all_findings = ruff_findings + llm_findings
-            stored = self.memory.store_review_learnings(all_findings, pr_info)
-            print(f"   Stored {stored} new learnings in Hindsight")
+            stored_entries = self.memory.store_review_learnings(
+                all_findings, pr_info
+            )
+            print(f"   Stored {len(stored_entries)} new learnings in Hindsight")
         else:
             print("\n⏭️  Step 5: Skipping learning storage (memory disabled)")
 
@@ -113,6 +116,10 @@ class ReviewOrchestrator:
             memory_stats=memory_stats,
             memory_context_used=memory_context or "",
             review_mode="with_memory" if use_memory else "without_memory",
+            stored_learnings=stored_entries,
+            bank_total_after=self.memory.count_memories()
+            if use_memory
+            else -1,
         )
 
         # Step 6: Optionally post to GitHub
@@ -180,13 +187,13 @@ class ReviewOrchestrator:
         ]
 
         # Store learnings
-        stored = 0
+        stored_entries = []
         if use_memory:
             print("\n📝 Storing new learnings...")
-            stored = self.memory.store_review_learnings(
+            stored_entries = self.memory.store_review_learnings(
                 ruff_findings + llm_findings, pr_info
             )
-            print(f"   Stored {stored} new learnings")
+            print(f"   Stored {len(stored_entries)} new learnings")
 
         result = ReviewResult(
             pr_info=pr_info,
@@ -197,6 +204,10 @@ class ReviewOrchestrator:
             memory_stats=memory_stats,
             memory_context_used=memory_context or "",
             review_mode="with_memory" if use_memory else "without_memory",
+            stored_learnings=stored_entries,
+            bank_total_after=self.memory.count_memories()
+            if use_memory
+            else -1,
         )
 
         print("\n✅ Synthetic review complete!")

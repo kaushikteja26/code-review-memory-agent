@@ -102,3 +102,5 @@ class ReviewResult(BaseModel):
     memory_stats: MemoryStats = Field(default_factory=MemoryStats)
     memory_context_used: str = ""
     review_mode: str = "with_memory"
+    stored_learnings: list[MemoryEntry] = []
+    bank_total_after: int = -1

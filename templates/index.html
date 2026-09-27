@@ -44,6 +44,64 @@
             </div>
         </section>
 
+        <!-- Memory Bank Counter -->
+        <section class="card memory-panel">
+            <h2>🧠 Memory Bank: <span id="bankTotal">…</span> items</h2>
+            <p class="section-desc">Live total in Hindsight. Watch it grow after every review.</p>
+        </section>
+
+        <!-- Learning Timeline -->
+        <section class="card demo-section">
+            <h2>🎬 Learning Timeline — Watch It Get Smarter</h2>
+            <p>Reset the timeline bank, then run Day 1 → Day 8 → Day 21. Same developer, new files, old mistakes.</p>
+            <div class="demo-buttons">
+                <button class="btn-demo" onclick="resetTimeline()">
+                    <span class="btn-icon">🗑️</span>
+                    <span class="btn-text">
+                        <strong>Reset Timeline</strong>
+                        <small>Wipe the timeline bank to 0</small>
+                    </span>
+                </button>
+                <button class="btn-demo" onclick="runTimeline(1)">
+                    <span class="btn-icon">1️⃣</span>
+                    <span class="btn-text">
+                        <strong>Day 1: Payment endpoint</strong>
+                        <small>Empty memory — what does it learn?</small>
+                    </span>
+                </button>
+                <button class="btn-demo" onclick="runTimeline(2)">
+                    <span class="btn-icon">2️⃣</span>
+                    <span class="btn-text">
+                        <strong>Day 8: Refund endpoint</strong>
+                        <small>Same SQL pattern, new file — caught?</small>
+                    </span>
+                </button>
+                <button class="btn-demo btn-with" onclick="runTimeline(3)">
+                    <span class="btn-icon">3️⃣</span>
+                    <span class="btn-text">
+                        <strong>Day 21: Payout endpoint</strong>
+                        <small>Subtle violations — full memory</small>
+                    </span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Team Insights -->
+        <section class="card demo-section">
+            <h2>🔮 Team Insights</h2>
+            <p>Synthesized trends across all stored reviews (Hindsight reflect).</p>
+            <div class="demo-buttons">
+                <button class="btn-demo btn-with" onclick="loadInsights()">
+                    <span class="btn-icon">💡</span>
+                    <span class="btn-text">
+                        <strong>Generate Team Insights</strong>
+                        <small>Recurring issues, patterns, trends</small>
+                    </span>
+                </button>
+            </div>
+            <div id="insightsOut" class="summary-text"></div>
+        </section>
+
         <!-- Demo Section -->
         <section class="card demo-section">
             <h2>🎮 Before/After Demo</h2>
@@ -130,6 +188,13 @@
                 <h2>🔧 Static Analysis (Ruff)</h2>
                 <div id="ruffFindingsList"></div>
             </section>
+
+            <!-- What I Learned -->
+            <section id="learnedPanel" class="card memory-panel hidden">
+                <h2>📚 Stored to Hindsight Memory</h2>
+                <p class="section-desc" id="learnedCount"></p>
+                <div id="learnedList"></div>
+            </section>
         </div>
 
         <!-- Seed Status -->
@@ -204,6 +269,56 @@
             }
         }
 
+        async function refreshBank() {
+            try {
+                const res = await fetch(`${API_BASE}/memory/count`);
+                const data = await res.json();
+                if (data.total >= 0) {
+                    document.getElementById('bankTotal').textContent = data.total;
+                }
+            } catch (e) { /* counter is best-effort */ }
+        }
+        refreshBank();
+
+        async function runTimeline(day) {
+            const labels = {1: '🧠 Day 1 review (empty memory)...', 2: '🧠 Day 8 review (with memory)...', 3: '🧠 Day 21 review (full memory)...'};
+            showLoading(labels[day] || '🧠 Reviewing...');
+            try {
+                const res = await fetch(`${API_BASE}/demo/timeline/${day}`, {method: 'POST'});
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                displayResults(data);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                hideLoading();
+                refreshBank();
+            }
+        }
+
+        async function resetTimeline() {
+            try {
+                await fetch(`${API_BASE}/demo/timeline/reset`, {method: 'POST'});
+                refreshBank();
+                alert('Timeline bank wiped. Run Day 1 → Day 8 → Day 21.');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function loadInsights() {
+            const out = document.getElementById('insightsOut');
+            out.textContent = '🔮 Synthesizing team trends...';
+            try {
+                const res = await fetch(`${API_BASE}/insights`);
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                out.textContent = data.insights || 'No insights yet — run some reviews first.';
+            } catch (e) {
+                out.textContent = 'Error: ' + e.message;
+            }
+        }
+
         async function seedMemories() {
             const seedStatus = document.getElementById('seedStatus');
             const seedText = document.getElementById('seedText');
@@ -219,6 +334,7 @@
                 
                 seedText.textContent = `✅ Successfully stored ${data.memories_stored} team memories in Hindsight! Now try "Step 3: Review WITH Memory" to see the difference.`;
                 seedStatus.className = 'card seed-status seeded';
+                refreshBank();
             } catch (e) {
                 seedText.textContent = '❌ Failed to seed: ' + e.message;
                 seedStatus.className = 'card seed-status error';
@@ -288,6 +404,22 @@
             } else {
                 ruffEl.classList.add('hidden');
             }
+
+            // What I learned (stored back to Hindsight)
+            const learnedEl = document.getElementById('learnedPanel');
+            const learnedList = document.getElementById('learnedList');
+            if (data.stored_learnings && data.stored_learnings.length > 0) {
+                learnedEl.classList.remove('hidden');
+                const total = data.bank_total_after >= 0 ? `Memory bank now: ${data.bank_total_after} items (+${data.stored_learnings.length} this review)` : '';
+                document.getElementById('learnedCount').textContent = total;
+                learnedList.innerHTML = data.stored_learnings.map(m =>
+                    `<div class="finding"><div class="finding-issue">[${m.type}] ${m.content}</div><div class="finding-explanation">${m.source_pr} — ${m.context}</div></div>`
+                ).join('');
+            } else {
+                learnedEl.classList.add('hidden');
+            }
+
+            refreshBank();
         }
 
         function renderFinding(f) {

@@ -8,6 +8,133 @@ from generic reviews.
 from core.models import PRInfo, FileDiff
 
 
+TIMELINE_BANK = "code-review-timeline"
+
+
+def get_timeline_pr(day: int) -> tuple[PRInfo, list[FileDiff]]:
+    """Progressive demo PRs: Day 1 (empty bank) → Day 8 → Day 21.
+
+    Each PR violates conventions the agent should have learned
+    from the previous ones.
+    """
+    if day == 1:
+        pr = PRInfo(
+            url="https://github.com/kaushikteja26/code_review_agent/pull/10",
+            owner="kaushikteja26",
+            repo="code_review_agent",
+            number=10,
+            title="Add payment endpoint (Day 1 — empty memory)",
+            author="junior-dev",
+            description="First PR. The agent has no team history yet.",
+            base_branch="main",
+            head_branch="feature/payments",
+        )
+        files = [
+            FileDiff(
+                filename="app/routes/payments.py",
+                status="added",
+                additions=22,
+                deletions=0,
+                patch='''@@ -0,0 +1,22 @@
++from fastapi import APIRouter
++import sqlite3
++
++router = APIRouter()
++
++@router.post("/payments")
++def charge_payment(user_id: int, amount: float):
++    conn = sqlite3.connect("app.db")
++    cursor = conn.cursor()
++    cursor.execute(f"INSERT INTO payments (user_id, amount) VALUES ({user_id}, {amount})")
++    conn.commit()
++    conn.close()
++    if amount <= 0:
++        return {"error": "Bad amount"}, 400
++    return {"status": "charged"}''',
+            ),
+        ]
+    elif day == 2:
+        pr = PRInfo(
+            url="https://github.com/kaushikteja26/code_review_agent/pull/14",
+            owner="kaushikteja26",
+            repo="code_review_agent",
+            number=14,
+            title="Add refund endpoint (Day 8 — agent has learned)",
+            author="junior-dev",
+            description="Second PR. Same developer repeats the SQL pattern in a new file.",
+            base_branch="main",
+            head_branch="feature/refunds",
+        )
+        files = [
+            FileDiff(
+                filename="app/routes/refunds.py",
+                status="added",
+                additions=20,
+                deletions=0,
+                patch='''@@ -0,0 +1,20 @@
++from fastapi import APIRouter
++import sqlite3
++import requests
++
++router = APIRouter()
++
++@router.post("/refunds")
++def issue_refund(payment_id):
++    conn = sqlite3.connect("app.db")
++    cur = conn.cursor()
++    cur.execute("SELECT * FROM payments WHERE id = " + str(payment_id))
++    row = cur.fetchone()
++    conn.close()
++    requests.post("https://notify.example.com/send", json={"id": payment_id})
++    return {"refunded": True}''',
+            ),
+        ]
+    else:
+        pr = PRInfo(
+            url="https://github.com/kaushikteja26/code_review_agent/pull/19",
+            owner="kaushikteja26",
+            repo="code_review_agent",
+            number=19,
+            title="Add payout endpoint (Day 21 — subtle violations)",
+            author="junior-dev",
+            description="Third PR. Subtler versions of known patterns plus a duplicated utility.",
+            base_branch="main",
+            head_branch="feature/payouts",
+        )
+        files = [
+            FileDiff(
+                filename="app/routes/payouts.py",
+                status="added",
+                additions=24,
+                deletions=0,
+                patch='''@@ -0,0 +1,24 @@
++from fastapi import APIRouter, HTTPException
++import sqlite3
++
++router = APIRouter()
++
++def validate_email(email):
++    if "@" in email:
++        return True
++    return False
++
++@router.post("/payouts")
++def create_payout(data: dict):
++    if not validate_email(data.get("email", "")):
++        raise HTTPException(status_code=400, detail="bad email")
++    conn = sqlite3.connect("app.db")
++    conn.execute(
++        "INSERT INTO payouts (email, amount) VALUES ('%s', %s)"
++        % (data["email"], data["total"])
++    )
++    conn.commit()
++    conn.close()
++    return {"status": "created"}''',
+            ),
+        ]
+    return pr, files
+
+
 def get_demo_pr_info() -> PRInfo:
     """Get synthetic PR metadata."""
     return PRInfo(

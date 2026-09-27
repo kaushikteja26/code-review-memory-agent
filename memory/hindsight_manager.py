@@ -20,9 +20,9 @@ from core.models import (
 class HindsightMemoryManager:
     """Abstraction layer around Hindsight for persistent team memory."""
 
-    def __init__(self):
+    def __init__(self, bank_id: str | None = None):
         self._client = None
-        self._bank_id = settings.HINDSIGHT_BANK_ID
+        self._bank_id = bank_id or settings.HINDSIGHT_BANK_ID
         self._available = False
 
         if settings.has_hindsight:
@@ -234,17 +234,17 @@ class HindsightMemoryManager:
 
     def store_review_learnings(
         self, findings: list[ReviewFinding], pr_info: PRInfo
-    ) -> int:
+    ) -> list[MemoryEntry]:
         """Extract and store learnings from a completed review.
 
         Converts significant review findings into memory entries
         and stores them in Hindsight.
-        Returns count of memories stored.
+        Returns the list of entries successfully stored.
         """
         if not self._available:
-            return 0
+            return []
 
-        stored = 0
+        stored: list[MemoryEntry] = []
         significant = [
             f
             for f in findings
@@ -262,9 +262,44 @@ class HindsightMemoryManager:
                 else f"File: {finding.file}",
             )
             if self.store_memory(entry):
-                stored += 1
+                stored.append(entry)
 
         return stored
+
+    def count_memories(self) -> int:
+        """Return total memories in this manager's bank. -1 if unavailable."""
+        if not self._available:
+            return -1
+        try:
+            response = self._client.list_memories(
+                bank_id=self._bank_id, limit=1
+            )
+            return int(response.total or 0)
+        except Exception as e:
+            print(f"  ⚠️  Memory count failed: {e}")
+            return -1
+
+    def reset_bank(self) -> bool:
+        """Delete this manager's bank (fresh timeline runs)."""
+        if not self._available:
+            return False
+        try:
+            self._client.delete_bank(bank_id=self._bank_id)
+            print(f"  🗑️  Bank '{self._bank_id}' deleted.")
+            return True
+        except Exception as e:
+            print(f"  ⚠️  Bank reset failed: {e}")
+            return False
+
+    def get_insights(self) -> str:
+        """Synthesize team-level trends across all stored reviews."""
+        if not self._available:
+            return ""
+        return self.reflect_memory(
+            "Summarize this team's recurring code issues, architectural patterns, "
+            "and how review quality is trending across all stored reviews. "
+            "Cite frequencies and specific patterns."
+        )
 
     def _build_smart_queries(
         self, pr_info: PRInfo, files: list[FileDiff]

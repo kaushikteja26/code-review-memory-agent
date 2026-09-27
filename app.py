@@ -15,7 +15,12 @@ from typing import Optional
 from config import settings
 from core.orchestrator import ReviewOrchestrator
 from demo.seed_memories import seed_demo_memories
-from demo.sample_diffs import get_demo_pr_info, get_demo_files
+from demo.sample_diffs import (
+    get_demo_pr_info,
+    get_demo_files,
+    get_timeline_pr,
+    TIMELINE_BANK,
+)
 from memory.hindsight_manager import HindsightMemoryManager
 
 app = FastAPI(
@@ -130,6 +135,72 @@ def demo_with_memory():
             pr_info=pr_info, files=files, use_memory=True
         )
         return JSONResponse(content=result.model_dump())
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/memory/count")
+def memory_count(bank: str | None = None):
+    """Live memory-bank total for the UI counter."""
+    try:
+        manager = HindsightMemoryManager(bank_id=bank)
+        return {"status": "success", "total": manager.count_memories()}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/insights")
+def team_insights():
+    """Team-level trends synthesized from all stored reviews."""
+    try:
+        manager = HindsightMemoryManager()
+        return {"status": "success", "insights": manager.get_insights()}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/demo/timeline/reset")
+def timeline_reset():
+    """Wipe the timeline bank for a fresh 0 → N learning run."""
+    try:
+        manager = HindsightMemoryManager(bank_id=TIMELINE_BANK)
+        ok = manager.reset_bank()
+        return {"status": "success" if ok else "empty", "total": 0}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/demo/timeline/{day}")
+def timeline_run(day: int):
+    """Run one step of the learning timeline (day 1, 2, or 3)."""
+    try:
+        if day not in (1, 2, 3):
+            return JSONResponse(status_code=400, content={"error": "day must be 1, 2, or 3"})
+        pr_info, files = get_timeline_pr(day)
+        orchestrator = ReviewOrchestrator(bank_id=TIMELINE_BANK)
+        result = orchestrator.review_synthetic(
+            pr_info=pr_info, files=files, use_memory=True
+        )
+        return JSONResponse(content=result.model_dump())
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/webhook/github")
+def github_webhook(payload: dict):
+    """Auto-review PRs on open. Needs a public URL (ngrok) + repo webhook."""
+    try:
+        if payload.get("action") not in ("opened", "synchronize"):
+            return {"status": "ignored"}
+        pr = payload.get("pull_request", {})
+        pr_url = pr.get("html_url", "")
+        if not pr_url:
+            return JSONResponse(status_code=400, content={"error": "no PR url"})
+        orchestrator = get_orchestrator()
+        result = orchestrator.review_pr(
+            pr_url=pr_url, use_memory=True, post_to_github=True
+        )
+        return {"status": "success", "findings": len(result.findings) + len(result.memory_insights)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
