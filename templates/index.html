@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Review Agent | HackwithHyderabad 3.0</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-top">
+                <h1>🤖 AI Code Review Agent</h1>
+                <span class="badge">HackwithHyderabad 3.0 | PS #8</span>
+            </div>
+            <p class="subtitle">Code reviews that learn your team's conventions through persistent Hindsight memory</p>
+            
+            <div class="status-bar">
+                <span class="status-item {{ 'active' if has_groq or has_google else 'inactive' }}">
+                    {{ '✅' if has_groq or has_google else '❌' }} LLM ({% if has_google %}Gemini{% elif has_groq %}Groq{% else %}None{% endif %})
+                </span>
+                <span class="status-item {{ 'active' if has_hindsight else 'inactive' }}">
+                    {{ '✅' if has_hindsight else '❌' }} Hindsight Memory
+                </span>
+                <span class="status-item {{ 'active' if has_github else 'inactive' }}">
+                    {{ '✅' if has_github else '⚠️' }} GitHub API
+                </span>
+            </div>
+        </header>
+
+        <!-- Review Input -->
+        <section class="card review-input">
+            <h2>📋 Review a Pull Request</h2>
+            <div class="input-group">
+                <input type="text" id="prUrl" placeholder="https://github.com/owner/repo/pull/123  or type 'demo'" />
+                <div class="toggle-group">
+                    <label class="toggle">
+                        <input type="checkbox" id="useMemory" checked>
+                        <span class="toggle-label">🧠 Use Memory</span>
+                    </label>
+                </div>
+                <button id="reviewBtn" onclick="submitReview()">🔍 Analyze PR</button>
+            </div>
+        </section>
+
+        <!-- Demo Section -->
+        <section class="card demo-section">
+            <h2>🎮 Before/After Demo</h2>
+            <p>Demonstrate how persistent memory transforms code reviews:</p>
+            <div class="demo-buttons">
+                <button class="btn-demo" onclick="runDemo('without')">
+                    <span class="btn-icon">📝</span>
+                    <span class="btn-text">
+                        <strong>Step 1: Review WITHOUT Memory</strong>
+                        <small>Generic review, no team context</small>
+                    </span>
+                </button>
+                <button class="btn-demo btn-seed" onclick="seedMemories()">
+                    <span class="btn-icon">🌱</span>
+                    <span class="btn-text">
+                        <strong>Step 2: Seed Team Knowledge</strong>
+                        <small>Load 10 historical team conventions into Hindsight</small>
+                    </span>
+                </button>
+                <button class="btn-demo btn-with" onclick="runDemo('with')">
+                    <span class="btn-icon">🧠</span>
+                    <span class="btn-text">
+                        <strong>Step 3: Review WITH Memory</strong>
+                        <small>Team-specific review using learned conventions</small>
+                    </span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Loading -->
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p id="loadingText">Analyzing pull request...</p>
+        </div>
+
+        <!-- Results -->
+        <div id="results" class="hidden">
+            <!-- Memory Stats Panel -->
+            <section id="memoryPanel" class="card memory-panel hidden">
+                <h2>🧠 MEMORY USED</h2>
+                <div class="memory-grid">
+                    <div class="memory-stat">
+                        <span class="stat-number" id="statTotal">0</span>
+                        <span class="stat-label">Memories Retrieved</span>
+                    </div>
+                    <div class="memory-stat">
+                        <span class="stat-number" id="statConventions">0</span>
+                        <span class="stat-label">Team Conventions</span>
+                    </div>
+                    <div class="memory-stat">
+                        <span class="stat-number" id="statRecurring">0</span>
+                        <span class="stat-label">Recurring Issues</span>
+                    </div>
+                    <div class="memory-stat">
+                        <span class="stat-number" id="statArch">0</span>
+                        <span class="stat-label">Architectural Decisions</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Review Summary -->
+            <section class="card">
+                <h2>📝 Review Summary</h2>
+                <div id="reviewMode" class="review-mode"></div>
+                <div id="summary" class="summary-text"></div>
+                <div class="pr-info" id="prInfo"></div>
+            </section>
+
+            <!-- Team-Specific Findings -->
+            <section id="memoryFindings" class="card memory-findings hidden">
+                <h2>🧠 Team-Specific Findings <span class="badge-mem">from Hindsight</span></h2>
+                <p class="section-desc">These findings are based on previously learned team conventions and review patterns.</p>
+                <div id="memoryFindingsList"></div>
+            </section>
+
+            <!-- General Findings -->
+            <section id="generalFindings" class="card hidden">
+                <h2>📋 General Findings</h2>
+                <div id="generalFindingsList"></div>
+            </section>
+
+            <!-- Static Analysis -->
+            <section id="ruffFindings" class="card hidden">
+                <h2>🔧 Static Analysis (Ruff)</h2>
+                <div id="ruffFindingsList"></div>
+            </section>
+        </div>
+
+        <!-- Seed Status -->
+        <div id="seedStatus" class="hidden card seed-status">
+            <p id="seedText"></p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        function showLoading(text) {
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('loadingText').textContent = text;
+            document.getElementById('results').classList.add('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        async function submitReview() {
+            const prUrl = document.getElementById('prUrl').value.trim();
+            const useMemory = document.getElementById('useMemory').checked;
+
+            if (!prUrl) {
+                alert('Please enter a PR URL or type "demo"');
+                return;
+            }
+
+            showLoading(useMemory ? 
+                '🧠 Analyzing PR with team memory...' : 
+                '📝 Analyzing PR (no memory)...');
+
+            try {
+                const res = await fetch(`${API_BASE}/review`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        pr_url: prUrl,
+                        use_memory: useMemory,
+                        post_to_github: false
+                    })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                displayResults(data);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function runDemo(mode) {
+            const endpoint = mode === 'with' ? 
+                '/demo/review-with-memory' : '/demo/review-without-memory';
+            
+            showLoading(mode === 'with' ? 
+                '🧠 Reviewing with team memory...' : 
+                '📝 Reviewing without memory (generic)...');
+
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, {method: 'POST'});
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                displayResults(data);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function seedMemories() {
+            const seedStatus = document.getElementById('seedStatus');
+            const seedText = document.getElementById('seedText');
+            
+            seedStatus.classList.remove('hidden');
+            seedText.textContent = '🌱 Seeding team knowledge into Hindsight...';
+            seedStatus.className = 'card seed-status seeding';
+
+            try {
+                const res = await fetch(`${API_BASE}/demo/seed`, {method: 'POST'});
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                
+                seedText.textContent = `✅ Successfully stored ${data.memories_stored} team memories in Hindsight! Now try "Step 3: Review WITH Memory" to see the difference.`;
+                seedStatus.className = 'card seed-status seeded';
+            } catch (e) {
+                seedText.textContent = '❌ Failed to seed: ' + e.message;
+                seedStatus.className = 'card seed-status error';
+            }
+        }
+
+        function displayResults(data) {
+            document.getElementById('results').classList.remove('hidden');
+
+            // Review mode badge
+            const modeEl = document.getElementById('reviewMode');
+            if (data.review_mode === 'with_memory') {
+                modeEl.innerHTML = '<span class="mode-badge mode-memory">🧠 WITH MEMORY</span>';
+            } else {
+                modeEl.innerHTML = '<span class="mode-badge mode-generic">📝 WITHOUT MEMORY</span>';
+            }
+
+            // PR Info
+            const prInfo = data.pr_info;
+            document.getElementById('prInfo').innerHTML = `
+                <span><strong>${prInfo.owner}/${prInfo.repo}</strong> #${prInfo.number}</span>
+                <span>by ${prInfo.author || 'unknown'}</span>
+            `;
+
+            // Summary
+            document.getElementById('summary').textContent = data.summary;
+
+            // Memory stats panel
+            const memPanel = document.getElementById('memoryPanel');
+            const stats = data.memory_stats;
+            if (stats && stats.total_memories_retrieved > 0) {
+                memPanel.classList.remove('hidden');
+                document.getElementById('statTotal').textContent = stats.total_memories_retrieved;
+                document.getElementById('statConventions').textContent = stats.team_conventions_matched;
+                document.getElementById('statRecurring').textContent = stats.recurring_issues_detected;
+                document.getElementById('statArch').textContent = stats.architectural_decisions_applied;
+            } else {
+                memPanel.classList.add('hidden');
+            }
+
+            // Memory findings
+            const memFindingsEl = document.getElementById('memoryFindings');
+            const memList = document.getElementById('memoryFindingsList');
+            if (data.memory_insights && data.memory_insights.length > 0) {
+                memFindingsEl.classList.remove('hidden');
+                memList.innerHTML = data.memory_insights.map(renderFinding).join('');
+            } else {
+                memFindingsEl.classList.add('hidden');
+            }
+
+            // General findings
+            const genEl = document.getElementById('generalFindings');
+            const genList = document.getElementById('generalFindingsList');
+            if (data.findings && data.findings.length > 0) {
+                genEl.classList.remove('hidden');
+                genList.innerHTML = data.findings.map(renderFinding).join('');
+            } else {
+                genEl.classList.add('hidden');
+            }
+
+            // Ruff findings
+            const ruffEl = document.getElementById('ruffFindings');
+            const ruffList = document.getElementById('ruffFindingsList');
+            if (data.ruff_findings && data.ruff_findings.length > 0) {
+                ruffEl.classList.remove('hidden');
+                ruffList.innerHTML = data.ruff_findings.map(renderFinding).join('');
+            } else {
+                ruffEl.classList.add('hidden');
+            }
+        }
+
+        function renderFinding(f) {
+            const icons = {critical: '🔴', high: '🟠', medium: '🟡', low: '🔵'};
+            const icon = icons[f.severity] || '⚪';
+            const memRef = f.memory_reference ? 
+                `<div class="finding-memory">🧠 ${f.memory_reference}</div>` : '';
+            const suggestion = f.suggestion ? 
+                `<div class="finding-suggestion">💡 <strong>Fix:</strong> ${f.suggestion}</div>` : '';
+            
+            return `
+                <div class="finding severity-${f.severity}">
+                    <div class="finding-header">
+                        <span class="finding-severity">${icon} ${f.severity.toUpperCase()}</span>
+                        <span class="finding-file">${f.file}${f.line ? ':' + f.line : ''}</span>
+                        <span class="finding-source source-${f.source}">${formatSource(f.source)}</span>
+                    </div>
+                    <div class="finding-issue">${f.issue}</div>
+                    <div class="finding-explanation">${f.explanation}</div>
+                    ${memRef}
+                    ${suggestion}
+                </div>
+            `;
+        }
+
+        function formatSource(s) {
+            const map = {
+                'team_convention': '🧠 Team Convention',
+                'historical_memory': '🧠 Historical Memory',
+                'general_reasoning': '💡 General',
+                'static_analysis': '🔧 Static Analysis'
+            };
+            return map[s] || s;
+        }
+    </script>
+</body>
+</html>
